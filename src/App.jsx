@@ -291,18 +291,35 @@ function App() {
         totalFixedExpenses += currentMonthFixedCosts;
         totalTrainerExpenses += currentMonthTrainerCost;
 
-        // Tax Logic
+        // Tax Logic (Monthly Estimated)
         const officialRevenueForTax = (totalGrossCardRevenueCombined - vatAmount);
         const currentMonthOfficialProfit = officialRevenueForTax - totalMonthlyExpenses;
+
         yearlyOfficialProfit += currentMonthOfficialProfit;
 
+        // Her ay tahmini vergi düş (%20 Sabit Oran Varsayımı - Geçici Vergi Gibi)
+        // Eğer o ay zarar ettiysek vergi 0.
         let monthlyTax = 0;
+        if (currentMonthOfficialProfit > 0) {
+            monthlyTax = currentMonthOfficialProfit * 0.20;
+        }
+
+        let taxDiscrepancy = 0;
+
+        // --- Tax Adjustment Check (December) ---
+        // Yıl sonunda sadece ne kadar şaştığını hesapla ama OTOMATİK DÜŞME.
         if (currentCalendarMonth === 12) {
-            const taxBase = Math.max(0, yearlyOfficialProfit);
-            monthlyTax = calculateIncomeTax(taxBase);
-            totalTaxAccrued += monthlyTax;
+            const actualYearlyTax = calculateIncomeTax(Math.max(0, yearlyOfficialProfit));
+            const totalEstimatedTaxPaid = totalTaxAccrued + monthlyTax;
+
+            // Fark: Gerçekleşen - Ödenen (Pozitifse Borç, Negatifse İade)
+            taxDiscrepancy = actualYearlyTax - totalEstimatedTaxPaid;
+
+            // Yıl bitti, sıfırla
             yearlyOfficialProfit = 0;
         }
+
+        totalTaxAccrued += monthlyTax;
 
         // Net Profit
         const netMonthlyProfit = totalMonthlyRevenue - totalMonthlyExpenses - monthlyTax;
@@ -321,9 +338,9 @@ function App() {
             balance: balance,
             salesVolume: totalPtSales,
             groupVolume: totalGroupSales,
-            adjustments: { ...monthAdjustments }
+            adjustments: { ...monthAdjustments },
+            taxDiscrepancy: taxDiscrepancy // Store discrepancy for display
         };
-
         const newStepData = [...stepData, newData];
         setStepData(newStepData);
 
@@ -434,20 +451,32 @@ function App() {
             totalFixedExpenses += currentMonthFixedCosts;
             totalTrainerExpenses += currentMonthTrainerCost;
 
+
             // --- Profit Accumulation for Tax ---
             const officialRevenueForTax = (totalGrossCardRevenueCombined - vatAmount);
             const currentMonthOfficialProfit = officialRevenueForTax - totalMonthlyExpenses;
 
             yearlyOfficialProfit += currentMonthOfficialProfit;
 
-            // --- Tax Calculation (December Check) ---
+            // Her ay tahmini vergi düş (%20 Sabit Oran Varsayımı - Geçici Vergi Gibi)
             let monthlyTax = 0;
+            if (currentMonthOfficialProfit > 0) {
+                monthlyTax = currentMonthOfficialProfit * 0.20;
+            }
+
+            let taxDiscrepancy = 0;
+
+            // --- Tax Adjustment Check (December) ---
             if (currentCalendarMonth === 12) {
-                const taxBase = Math.max(0, yearlyOfficialProfit);
-                monthlyTax = calculateIncomeTax(taxBase);
-                totalTaxAccrued += monthlyTax;
+                const actualYearlyTax = calculateIncomeTax(Math.max(0, yearlyOfficialProfit));
+                const totalEstimatedTaxPaid = totalTaxAccrued + monthlyTax;
+
+                taxDiscrepancy = actualYearlyTax - totalEstimatedTaxPaid;
+
                 yearlyOfficialProfit = 0;
             }
+
+            totalTaxAccrued += monthlyTax;
 
             // --- Net Profit (Cash Flow) ---
             const netMonthlyProfit = totalMonthlyRevenue - totalMonthlyExpenses - monthlyTax;
@@ -465,7 +494,8 @@ function App() {
                 net: netMonthlyProfit,
                 balance: cumulativeBalance,
                 salesVolume: totalPtSales,
-                groupVolume: totalGroupSales
+                groupVolume: totalGroupSales,
+                taxDiscrepancy: taxDiscrepancy
             });
 
             // Increment Calendar Month
@@ -960,6 +990,11 @@ function App() {
                                                 <td style={{ padding: '1rem', color: 'var(--danger-color)' }}>{formatCurrency(d.expenses)}</td>
                                                 <td style={{ padding: '1rem', color: '#fbbf24', fontWeight: d.tax > 0 ? 'bold' : 'normal' }}>
                                                     {formatCurrency(d.tax)}
+                                                    {d.taxDiscrepancy && d.taxDiscrepancy !== 0 && (
+                                                        <div style={{ fontSize: '0.7em', color: d.taxDiscrepancy > 0 ? 'var(--danger-color)' : 'var(--success-color)', marginTop: '0.2rem' }}>
+                                                            {d.taxDiscrepancy > 0 ? `+${formatCurrency(d.taxDiscrepancy)} Fark` : `${formatCurrency(d.taxDiscrepancy)} İade`}
+                                                        </div>
+                                                    )}
                                                 </td>
                                                 <td style={{ padding: '1rem', color: d.net >= 0 ? 'var(--success-color)' : 'var(--danger-color)' }}>
                                                     {formatCurrency(d.net)}
