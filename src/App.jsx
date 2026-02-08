@@ -758,6 +758,18 @@ function App() {
                                     <label>Haftalık İptal</label>
                                     <input type="number" value={trainer.cancelRate} onChange={e => updateTrainer(trainer.id, 'cancelRate', e.target.value)} />
                                 </div>
+                                {trainer.type === 'owner' && (
+                                    <div className="form-group" style={{ marginTop: '0.5rem', borderTop: '1px dashed var(--accent-color)', paddingTop: '0.5rem' }}>
+                                        <label style={{ color: 'var(--accent-color)', fontWeight: 'bold' }}>👔 Patron Maaşı (Aylık Geçim)</label>
+                                        <input
+                                            type="number"
+                                            placeholder="0"
+                                            value={trainer.ownerSalary || ''}
+                                            onChange={e => updateTrainer(trainer.id, 'ownerSalary', e.target.value)}
+                                        />
+                                        <small className="text-secondary">İş yeri sahibinin şahsi harcamaları.</small>
+                                    </div>
+                                )}
 
                                 <div style={{ marginTop: '1rem', padding: '0.75rem', background: 'rgba(0, 0, 0, 0.2)', borderRadius: '0.5rem' }}>
                                     <div style={{ fontSize: '0.8rem', color: 'var(--text-secondary)' }}>Salon Kazancı (Tahmini)</div>
