@@ -29,7 +29,9 @@ function App() {
     const [startupCosts, setStartupCosts] = useState({
         architecture: 200000,
         equipment: 500000,
-        fixtures: 100000
+        fixtures: 100000,
+        reformerCount: 4, // Kaç adet reformer aleti alındığı
+        reformerPrice: 60000 // Tane başı reformer fiyatı (Opsiyonel, equipment'a dahil değilse ekle)
     });
 
     // 3. Gelirler (Income)
@@ -55,6 +57,28 @@ function App() {
     // Simulation
     const [simulationMonths, setSimulationMonths] = useState(12);
     const [startMonth, setStartMonth] = useState(1); // 1 = Ocak
+    const [simulationMode, setSimulationMode] = useState('instant'); // 'instant' | 'interactive'
+    const [currentStep, setCurrentStep] = useState(0); // 0 = not started, 1..N = months
+    const [stepData, setStepData] = useState([]);
+    const [cumulativeState, setCumulativeState] = useState({
+        balance: 0,
+        totalStartup: 0,
+        yearlyOfficialProfit: 0, // For Tax
+        totalTaxAccrued: 0,
+        totalGrossCashRevenue: 0,
+        totalGrossCardRevenue: 0,
+        totalVAT: 0,
+        totalPOS: 0,
+        totalFixedExpenses: 0,
+        totalTrainerExpenses: 0
+    });
+
+    const [monthAdjustments, setMonthAdjustments] = useState({
+        volumePercent: 0,
+        vacations: [], // array of trainer IDs
+        extraExpense: 0
+    });
+
     const [results, setResults] = useState(null);
 
     const months = [
@@ -82,6 +106,7 @@ function App() {
         setTrainers(trainers.map(t => t.id === id ? { ...t, [field]: value } : t));
     };
 
+
     // Helper to estimate current packages based on active trainers
     const calculateEstimatedPackages = () => {
         const ptLessons = trainers.reduce((acc, t) => {
@@ -93,7 +118,9 @@ function App() {
 
     const calculateEstimatedGroupPackages = () => {
         const groupLessons = trainers.reduce((acc, t) => acc + Number(t.monthlyGroupLessons), 0);
-        const totalVisits = groupLessons * Number(income.avgClassSize);
+        // Her grup dersinde tüm reformerlar dolu varsayıyoruz (Kapasite)
+        const capacity = Number(startupCosts.reformerCount);
+        const totalVisits = groupLessons * capacity;
         return Math.ceil(totalVisits / 10);
     };
 
@@ -130,11 +157,238 @@ function App() {
         return tax + (cumulativeProfit - 5300000) * 0.40;
     };
 
+
+    // --- Interactive Simulation Logic ---
+    const startInteractiveSimulation = () => {
+        setResults(null);
+        setSimulationMode('interactive');
+        setCurrentStep(1);
+        setStepData([]);
+
+        // Initial Cumulative State
+        const rentStartupCost = (Number(expenses.rent) * 2) + (Number(expenses.rent) * 1);
+        const totalStartup = Number(startupCosts.architecture) + Number(startupCosts.equipment) + Number(startupCosts.fixtures) + rentStartupCost;
+
+        setCumulativeState({
+            balance: -totalStartup,
+            totalStartup: totalStartup,
+            yearlyOfficialProfit: 0,
+            totalTaxAccrued: 0,
+            totalGrossCashRevenue: 0,
+            totalGrossCardRevenue: 0,
+            totalVAT: 0,
+            totalPOS: 0,
+            totalFixedExpenses: 0,
+            totalTrainerExpenses: 0
+        });
+
+        // Reset adjustments
+        setMonthAdjustments({
+            volumePercent: 0,
+            vacations: [],
+            extraExpense: 0
+        });
+    };
+
+    const runNextStep = () => {
+        const i = currentStep;
+        let currentCalendarMonth = Number(startMonth) + (i - 1);
+        while (currentCalendarMonth > 12) currentCalendarMonth -= 12;
+
+        let {
+            balance, yearlyOfficialProfit, totalTaxAccrued,
+            totalGrossCashRevenue, totalGrossCardRevenue, totalVAT, totalPOS, totalFixedExpenses, totalTrainerExpenses
+        } = cumulativeState;
+
+        // --- 1. Calculate Volume (with Adjustments) ---
+        let totalRealizedLessons = 0;
+        let totalGroupLessons = 0;
+        let currentMonthTrainerCost = 0;
+        const ptPrice = Number(income.packagePrice);
+        const capacity = Number(startupCosts.reformerCount);
+
+        trainers.forEach(t => {
+            // Base Lessons
+            let basePt = Math.max(0, Number(t.monthlyLessons) - (Number(t.cancelRate) * 4));
+            let baseGroup = Number(t.monthlyGroupLessons || 0);
+
+            // Apply Vacation (1 Week = 25% reduction for that month)
+            if (monthAdjustments.vacations.includes(t.id)) {
+                basePt = basePt * 0.75;
+                baseGroup = baseGroup * 0.75;
+            }
+
+            // Apply Volume Adjustment (%)
+            const factor = 1 + (Number(monthAdjustments.volumePercent) / 100);
+            const finalPt = basePt * factor;
+            const finalGroup = baseGroup * factor;
+
+            totalRealizedLessons += finalPt;
+            totalGroupLessons += finalGroup;
+
+            // Cost Calculation
+            if (t.type === 'salary') {
+                currentMonthTrainerCost += (finalPt * Number(expenses.staffPerLesson)) + (finalGroup * Number(expenses.staffGroupLesson));
+            } else if (t.type === 'freelance') {
+                const ptLessonPrice = ptPrice / 10;
+                const ptTrainerShare = ptLessonPrice * (expenses.freelancePercentage / 100);
+                const groupTrainerShare = Number(expenses.freelanceGroupLesson);
+
+                currentMonthTrainerCost += (finalPt * ptTrainerShare) + (finalGroup * groupTrainerShare);
+            } else if (t.type === 'owner') {
+                currentMonthTrainerCost += 11725.65;
+            }
+        });
+
+        // --- 2. Revenue Calculation ---
+        const totalPtSales = totalRealizedLessons / 10;
+        const ptCashCount = totalPtSales * (income.cashRatio / 100);
+        const ptCardCount = totalPtSales * ((100 - income.cashRatio) / 100);
+        const ptCashRevenue = ptCashCount * (ptPrice * 0.90);
+        const ptGrossCardRevenue = ptCardCount * ptPrice;
+
+        const totalGroupVisits = totalGroupLessons * capacity;
+        const totalGroupSales = totalGroupVisits / 10;
+        const groupCashCount = totalGroupSales * (income.groupCashRatio / 100);
+        const groupCardCount = totalGroupSales * ((100 - income.groupCashRatio) / 100);
+        const groupPrice = Number(income.groupPackagePrice);
+        const groupCashRevenue = groupCashCount * (groupPrice * 0.90);
+        const groupGrossCardRevenue = groupCardCount * groupPrice;
+
+        const totalCashRevenue = ptCashRevenue + groupCashRevenue;
+        const totalGrossCardRevenueCombined = ptGrossCardRevenue + groupGrossCardRevenue;
+
+        // VAT & POS
+        const vatAmount = totalGrossCardRevenueCombined - (totalGrossCardRevenueCombined / 1.20);
+        const posCommissionAmount = totalGrossCardRevenueCombined * (income.posRate / 100);
+        const netCardInflow = totalGrossCardRevenueCombined - vatAmount - posCommissionAmount;
+
+        const totalMonthlyRevenue = totalCashRevenue + netCardInflow;
+
+        // --- 3. Fixed Costs + Extra ---
+        const rentCost = Number(expenses.rent) / 0.80;
+        let currentMonthFixedCosts =
+            Number(expenses.staffFixedCost) +
+            rentCost +
+            Number(expenses.electricity) +
+            Number(expenses.water) +
+            Number(expenses.gas) +
+            Number(expenses.amenities) +
+            Number(expenses.cleaning) +
+            Number(expenses.subscriptions) +
+            Number(expenses.accountant);
+
+        // Add User Defined Extra Expense
+        currentMonthFixedCosts += Number(monthAdjustments.extraExpense);
+
+        const totalMonthlyExpenses = currentMonthFixedCosts + currentMonthTrainerCost;
+
+        // --- 4. Accumulate ---
+        totalGrossCashRevenue += totalCashRevenue;
+        totalGrossCardRevenue += totalGrossCardRevenueCombined;
+        totalVAT += vatAmount;
+        totalPOS += posCommissionAmount;
+        totalFixedExpenses += currentMonthFixedCosts;
+        totalTrainerExpenses += currentMonthTrainerCost;
+
+        // Tax Logic
+        const officialRevenueForTax = (totalGrossCardRevenueCombined - vatAmount);
+        const currentMonthOfficialProfit = officialRevenueForTax - totalMonthlyExpenses;
+        yearlyOfficialProfit += currentMonthOfficialProfit;
+
+        let monthlyTax = 0;
+        if (currentCalendarMonth === 12) {
+            const taxBase = Math.max(0, yearlyOfficialProfit);
+            monthlyTax = calculateIncomeTax(taxBase);
+            totalTaxAccrued += monthlyTax;
+            yearlyOfficialProfit = 0;
+        }
+
+        // Net Profit
+        const netMonthlyProfit = totalMonthlyRevenue - totalMonthlyExpenses - monthlyTax;
+        balance += netMonthlyProfit;
+
+        // Store Step Data
+        const newData = {
+            month: i,
+            calendarMonthName: months[currentCalendarMonth - 1],
+            revenue: totalMonthlyRevenue,
+            expenses: totalMonthlyExpenses,
+            vat: vatAmount,
+            pos: posCommissionAmount,
+            tax: monthlyTax,
+            net: netMonthlyProfit,
+            balance: balance,
+            salesVolume: totalPtSales,
+            groupVolume: totalGroupSales,
+            adjustments: { ...monthAdjustments }
+        };
+
+        const newStepData = [...stepData, newData];
+        setStepData(newStepData);
+
+        // Update Cumulative State
+        setCumulativeState({
+            balance, yearlyOfficialProfit, totalTaxAccrued, totalGrossCashRevenue, totalGrossCardRevenue,
+            totalVAT, totalPOS, totalFixedExpenses, totalTrainerExpenses, totalStartup: cumulativeState.totalStartup
+        });
+
+        // Check if finished
+        if (currentStep >= simulationMonths) {
+            // FINISH
+            setResults({
+                monthlyData: newStepData,
+                finalBalance: balance,
+                totalStartup: cumulativeState.totalStartup,
+                avgMonthlyRevenue: newStepData.reduce((acc, curr) => acc + curr.revenue, 0) / simulationMonths,
+                avgMonthlyNet: newStepData.reduce((acc, curr) => acc + curr.net, 0) / simulationMonths,
+                totalTax: totalTaxAccrued,
+                breakdown: {
+                    grossCash: totalGrossCashRevenue,
+                    grossCard: totalGrossCardRevenue,
+                    vat: totalVAT,
+                    pos: totalPOS,
+                    fixedExpenses: totalFixedExpenses,
+                    trainerExpenses: totalTrainerExpenses,
+                    netRevenue: (totalGrossCashRevenue + totalGrossCardRevenue) - totalVAT - totalPOS,
+                    totalExpenses: totalFixedExpenses + totalTrainerExpenses
+                }
+            });
+            setCurrentStep(0); // Ends interactive mode UI overlay
+            setSimulationMode('instant'); // Show results
+            setTimeout(() => {
+                document.getElementById('results-section')?.scrollIntoView({ behavior: 'smooth' });
+            }, 100);
+        } else {
+            // ADVANCE
+            setCurrentStep(currentStep + 1);
+            // Reset Adjustments for next month (keep volume change if desired? no, reset for now as per "extra for that month")
+            // Actually, keep volume change persistent? User said "bu ay totalde %X dersleri azaltı veya arttı". Implies transient.
+            setMonthAdjustments({
+                volumePercent: 0,
+                vacations: [],
+                extraExpense: 0
+            });
+        }
+    };
+
+    const toggleVacation = (id) => {
+        const currentvacations = monthAdjustments.vacations;
+        if (currentvacations.includes(id)) {
+            setMonthAdjustments({ ...monthAdjustments, vacations: currentvacations.filter(v => v !== id) });
+        } else {
+            setMonthAdjustments({ ...monthAdjustments, vacations: [...currentvacations, id] });
+        }
+    };
+
     const calculateSimulation = () => {
         const monthlyData = [];
 
         // Startup Costs Calculation
         const rentStartupCost = (Number(expenses.rent) * 2) + (Number(expenses.rent) * 1); // 2 Depozito + 1 Emlakçı
+        // Reformer Maliyeti (Eğer equipment kalemine dahil edilmediyse ayrıca ekliyoruz - opsiyonel, burada manuel ekliyse silebiliriz ama ayrı kalem olması iyi)
+        // const reformerCost = Number(startupCosts.reformerCount) * Number(startupCosts.reformerPrice);
+
         let totalStartup = Number(startupCosts.architecture) + Number(startupCosts.equipment) + Number(startupCosts.fixtures) + rentStartupCost;
 
         let cumulativeBalance = -totalStartup;
@@ -352,8 +606,11 @@ function App() {
                                 <input type="number" value={income.groupPackagePrice} onChange={e => setIncome({ ...income, groupPackagePrice: e.target.value })} />
                             </div>
                             <div className="form-group">
-                                <label>Ort. Sınıf Mevcudu</label>
-                                <input type="number" value={income.avgClassSize} onChange={e => setIncome({ ...income, avgClassSize: e.target.value })} />
+                                <label>Ort. Doluluk (Kişi)</label>
+                                <div style={{ padding: '0.5rem', background: 'var(--card-bg)', border: '1px solid var(--border-color)', borderRadius: '0.25rem' }}>
+                                    {startupCosts.reformerCount} Kişi (Full)
+                                </div>
+                                <small className="text-secondary">Reformer sayısına göre sabitlendi.</small>
                             </div>
                         </div>
 
@@ -426,7 +683,9 @@ function App() {
                         const grossRevenueGenerated = generatedPackages * Number(income.packagePrice);
 
                         // Group Revenue Generated (Approx)
-                        const groupRevenueGenerated = (groupLessons * Number(income.avgClassSize) / 10) * Number(income.groupPackagePrice);
+                        // Hoca 1 saat grup dersi verince, Reformer Sayısı kadar öğrenci geliri yazar.
+                        const capacity = Number(startupCosts.reformerCount);
+                        const groupRevenueGenerated = (groupLessons * capacity / 10) * Number(income.groupPackagePrice);
                         const totalGrossGenerated = grossRevenueGenerated + groupRevenueGenerated;
 
                         return (
@@ -500,13 +759,91 @@ function App() {
                 </div>
 
                 <button className="btn-primary" onClick={calculateSimulation}>
-                    🚀 Simülasyonu Başlat
+                    🚀 Simülasyonu Başlat (Hızlı)
+                </button>
+                <button className="btn-primary" style={{ background: 'var(--accent-color)' }} onClick={startInteractiveSimulation}>
+                    ▶️ Simülasyonu İŞLET (Adım Adım)
                 </button>
             </div>
 
+            {/* Interactive Mode Dashboard */}
+            {simulationMode === 'interactive' && currentStep > 0 && (
+                <div className="card" style={{ border: '2px solid var(--accent-color)', background: 'rgba(14, 165, 233, 0.05)' }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem' }}>
+                        <h2 style={{ margin: 0, color: 'var(--accent-color)' }}>
+                            🗓️ {currentStep}. Ay İşlemleri ({months[(Number(startMonth) + (currentStep - 2)) % 12 || (Number(startMonth) + 11) % 12]})
+                        </h2>
+                        <div className="stat-value" style={{ fontSize: '1rem' }}>
+                            Kasa: {formatCurrency(cumulativeState.balance)}
+                        </div>
+                    </div>
+
+                    <div className="grid-2">
+                        {/* Volume Control */}
+                        <div className="form-group" style={{ background: 'var(--card-bg)', padding: '1rem', borderRadius: '0.5rem' }}>
+                            <label>📊 İş Hacmi (Ders Yoğunluğu)</label>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '1rem' }}>
+                                <input
+                                    type="range" min="-50" max="50" step="10"
+                                    value={monthAdjustments.volumePercent}
+                                    onChange={e => setMonthAdjustments({ ...monthAdjustments, volumePercent: e.target.value })}
+                                />
+                                <span style={{ fontWeight: 'bold', color: monthAdjustments.volumePercent > 0 ? 'var(--success-color)' : monthAdjustments.volumePercent < 0 ? 'var(--danger-color)' : 'inherit' }}>
+                                    %{monthAdjustments.volumePercent > 0 ? '+' : ''}{monthAdjustments.volumePercent}
+                                </span>
+                            </div>
+                            <small className="text-secondary">Bu ay tüm dersler bu oranda artacak/azalacak.</small>
+                        </div>
+
+                        {/* Extra Expense */}
+                        <div className="form-group" style={{ background: 'var(--card-bg)', padding: '1rem', borderRadius: '0.5rem' }}>
+                            <label>💸 Bu Ay Ekstra Gider</label>
+                            <input
+                                type="number"
+                                placeholder="Örn: Tamirat, Reklam..."
+                                value={monthAdjustments.extraExpense}
+                                onChange={e => setMonthAdjustments({ ...monthAdjustments, extraExpense: e.target.value })}
+                            />
+                        </div>
+                    </div>
+
+                    {/* Vacations */}
+                    <div style={{ marginTop: '1rem' }}>
+                        <h4>🏖️ Hoca Tatil / İzin Durumu (1 Hafta)</h4>
+                        <div className="grid-3">
+                            {trainers.map(t => (
+                                <div
+                                    key={t.id}
+                                    onClick={() => toggleVacation(t.id)}
+                                    style={{
+                                        padding: '0.5rem',
+                                        border: '1px solid var(--border-color)',
+                                        borderRadius: '0.5rem',
+                                        cursor: 'pointer',
+                                        background: monthAdjustments.vacations.includes(t.id) ? 'rgba(239, 68, 68, 0.2)' : 'var(--card-bg)',
+                                        borderColor: monthAdjustments.vacations.includes(t.id) ? 'var(--danger-color)' : 'var(--border-color)',
+                                        display: 'flex', justifyContent: 'space-between', alignItems: 'center'
+                                    }}
+                                >
+                                    <span>{t.name}</span>
+                                    {monthAdjustments.vacations.includes(t.id) && <span>🏖️ İzinli</span>}
+                                </div>
+                            ))}
+                        </div>
+                        <small className="text-secondary">Seçilen hocalar bu ay 1 hafta (%25) daha az ders verecek.</small>
+                    </div>
+
+                    <div style={{ marginTop: '2rem', display: 'flex', justifyContent: 'flex-end' }}>
+                        <button className="btn-primary" style={{ width: 'auto', padding: '0.75rem 2rem' }} onClick={runNextStep}>
+                            {currentStep >= simulationMonths ? '✅ Simülasyonu Tamamla' : '➡️ Ayı Kapat ve İlerle'}
+                        </button>
+                    </div>
+                </div>
+            )}
+
             {/* Results */}
             {
-                results && (
+                (results && simulationMode === 'instant' || simulationMode === 'interactive' && results) && (
                     <div id="results-section" className="summary-section">
                         <h2>📈 Simülasyon Sonucu ({simulationMonths} Ay)</h2>
 
@@ -613,6 +950,10 @@ function App() {
                                                 <td style={{ padding: '1rem' }}>
                                                     <div>{d.month}. Ay</div>
                                                     <div style={{ fontSize: '0.8em', color: 'var(--text-secondary)' }}>{d.calendarMonthName}</div>
+                                                    {/* Show adjustmens icon if any */}
+                                                    {d.adjustments && (d.adjustments.volumePercent !== 0 || d.adjustments.extraExpense !== 0 || d.adjustments.vacations.length > 0) && (
+                                                        <div style={{ fontSize: '0.7em', color: 'var(--accent-color)' }}>⚠️ Müdaheleli</div>
+                                                    )}
                                                 </td>
                                                 <td style={{ padding: '1rem', color: 'var(--success-color)' }}>{formatCurrency(d.revenue)}</td>
                                                 <td style={{ padding: '1rem', color: 'var(--text-secondary)' }}>{formatCurrency(d.vat)}</td>
