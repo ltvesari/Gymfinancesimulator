@@ -644,19 +644,8 @@ function App() {
                                 </div>
                                 <small className="text-secondary">Reformer sayısına göre sabitlendi.</small>
                             </div>
-                            {trainer.type === 'owner' && (
-                                <div className="form-group" style={{ marginTop: '0.5rem', borderTop: '1px dashed var(--accent-color)', paddingTop: '0.5rem' }}>
-                                    <label style={{ color: 'var(--accent-color)', fontWeight: 'bold' }}>👔 Patron Maaşı (Aylık Geçim)</label>
-                                    <input
-                                        type="number"
-                                        placeholder="0"
-                                        value={trainer.ownerSalary || ''}
-                                        onChange={e => updateTrainer(trainer.id, 'ownerSalary', e.target.value)}
-                                    />
-                                    <small className="text-secondary">İş yeri sahibinin şahsi harcamaları.</small>
-                                </div>
-                            )}
                         </div>
+
                         <div className="form-group" style={{ background: 'rgba(124, 58, 237, 0.1)', padding: '1rem', borderRadius: '0.5rem', border: '1px solid rgba(124, 58, 237, 0.2)' }}>
                             <label style={{ color: '#c084fc', fontWeight: 'bold' }}>Tahmini Grup Paket Satışı</label>
                             <div className="stat-value">{calculateEstimatedGroupPackages()} Adet / Ay</div>
