@@ -696,7 +696,6 @@ function App() {
                         const realizedLessons = Math.max(0, Number(trainer.monthlyLessons) - (Number(trainer.cancelRate) * 4));
                         let estimatedIncome = 0;
                         let incomeLabel = '';
-                        // let isCostNegative = false; // Unused for now
 
                         // Group Lesson Calculation for Trainer
                         const groupLessons = Number(trainer.monthlyGroupLessons || 0);
@@ -726,7 +725,6 @@ function App() {
                         const grossRevenueGenerated = generatedPackages * Number(income.packagePrice);
 
                         // Group Revenue Generated (Approx)
-                        // Hoca 1 saat grup dersi verince, Reformer Sayısı kadar öğrenci geliri yazar.
                         const capacity = Number(startupCosts.reformerCount);
                         const groupRevenueGenerated = (groupLessons * capacity / 10) * Number(income.groupPackagePrice);
                         const totalGrossGenerated = grossRevenueGenerated + groupRevenueGenerated;
@@ -758,6 +756,7 @@ function App() {
                                     <label>Haftalık İptal</label>
                                     <input type="number" value={trainer.cancelRate} onChange={e => updateTrainer(trainer.id, 'cancelRate', e.target.value)} />
                                 </div>
+
                                 {trainer.type === 'owner' && (
                                     <div className="form-group" style={{ marginTop: '0.5rem', borderTop: '1px dashed var(--accent-color)', paddingTop: '0.5rem' }}>
                                         <label style={{ color: 'var(--accent-color)', fontWeight: 'bold' }}>👔 Patron Maaşı (Aylık Geçim)</label>
