@@ -11,8 +11,10 @@ function App() {
     // 1. Aylık Giderler (Monthly Expenses)
     const [expenses, setExpenses] = useState({
         staffFixedCost: 40214.03, // Maaşlı çalışan sabit maliyeti
-        staffPerLesson: 150, // Maaşlı çalışan ders başı kazancı (default guess)
-        freelancePercentage: 40, // Freelancer yüzdesi
+        staffPerLesson: 150, // Maaşlı çalışan ders başı kazancı (PT)
+        staffGroupLesson: 250, // Maaşlı çalışan grup dersi başı kazancı
+        freelancePercentage: 40, // Freelancer yüzdesi (PT)
+        freelanceGroupLesson: 250, // Freelancer grup dersi başı kazancı (Sabit Tutar)
         rent: 20000,
         electricity: 3000,
         water: 1000,
@@ -32,15 +34,22 @@ function App() {
 
     // 3. Gelirler (Income)
     const [income, setIncome] = useState({
-        packagePrice: 10000,
-        // totalMonthlySales removed, calculated dynamically
+        packagePrice: 10000, // PT Paketi
+        groupPackagePrice: 3000, // Grup Dersi Paketi
+        avgClassSize: 5, // Ortalama grup dersi katılımcı sayısı
+
+        // PT Ratios
         cashRatio: 50, // %50 cash, %50 card
+
+        // Group Ratios
+        groupCashRatio: 50, // %50 cash, %50 card for groups
+
         posRate: 2.5
     });
 
     // 4. Hocalar (Trainers)
     const [trainers, setTrainers] = useState([
-        { id: 1, name: 'Hoca 1', type: 'salary', studentCount: 10, monthlyLessons: 40, cancelRate: 1 }
+        { id: 1, name: 'Hoca 1', type: 'salary', studentCount: 10, monthlyLessons: 40, monthlyGroupLessons: 0, cancelRate: 1 }
     ]);
 
     // Simulation
@@ -60,6 +69,7 @@ function App() {
             type: 'freelance',
             studentCount: 5,
             monthlyLessons: 20,
+            monthlyGroupLessons: 0,
             cancelRate: 1
         }]);
     };
@@ -74,11 +84,17 @@ function App() {
 
     // Helper to estimate current packages based on active trainers
     const calculateEstimatedPackages = () => {
-        const totalLessons = trainers.reduce((acc, t) => {
+        const ptLessons = trainers.reduce((acc, t) => {
             const realized = Math.max(0, Number(t.monthlyLessons) - (Number(t.cancelRate) * 4));
             return acc + realized;
         }, 0);
-        return Math.ceil(totalLessons / 10); // Round up or keep decimal? Let's keep decimal for financial precision, but ceil for UI.
+        return Math.ceil(ptLessons / 10);
+    };
+
+    const calculateEstimatedGroupPackages = () => {
+        const groupLessons = trainers.reduce((acc, t) => acc + Number(t.monthlyGroupLessons), 0);
+        const totalVisits = groupLessons * Number(income.avgClassSize);
+        return Math.ceil(totalVisits / 10);
     };
 
     // Helper for Income Tax (2026 Brackets)
@@ -116,7 +132,11 @@ function App() {
 
     const calculateSimulation = () => {
         const monthlyData = [];
-        let totalStartup = Number(startupCosts.architecture) + Number(startupCosts.equipment) + Number(startupCosts.fixtures);
+
+        // Startup Costs Calculation
+        const rentStartupCost = (Number(expenses.rent) * 2) + (Number(expenses.rent) * 1); // 2 Depozito + 1 Emlakçı
+        let totalStartup = Number(startupCosts.architecture) + Number(startupCosts.equipment) + Number(startupCosts.fixtures) + rentStartupCost;
+
         let cumulativeBalance = -totalStartup;
 
         // Annual Tax Tracking
@@ -134,52 +154,11 @@ function App() {
         let currentCalendarMonth = Number(startMonth);
 
         for (let i = 1; i <= simulationMonths; i++) {
-            // --- Calculate Volume from Trainers ---
-            let totalRealizedLessons = 0;
-            let currentMonthTrainerCost = 0;
-            const price = Number(income.packagePrice);
-
-            trainers.forEach(t => {
-                const realizedLessons = Math.max(0, Number(t.monthlyLessons) - (Number(t.cancelRate) * 4));
-                totalRealizedLessons += realizedLessons;
-
-                if (t.type === 'salary') {
-                    currentMonthTrainerCost += realizedLessons * Number(expenses.staffPerLesson);
-                } else if (t.type === 'freelance') {
-                    const lessonPrice = price / 10;
-                    const trainerShare = lessonPrice * (expenses.freelancePercentage / 100);
-                    currentMonthTrainerCost += realizedLessons * trainerShare;
-                } else if (t.type === 'owner') {
-                    currentMonthTrainerCost += 11725.65;
-                }
-            });
-
-            // --- Revenue Calculation ---
-            const totalSales = totalRealizedLessons / 10;
-            // Split Total Sales based on Cash Ratio
-            const cashCount = totalSales * (income.cashRatio / 100);
-            const cardCount = totalSales * ((100 - income.cashRatio) / 100);
-
-            // Cash Sales (10% discount)
-            const cashRevenue = cashCount * (price * 0.90);
-
-            // Card Sales
-            // Gross Card Revenue (includes VAT)
-            const grossCardRevenue = cardCount * price;
-
-            // VAT Calculation (Price includes 20% VAT)
-            const vatAmount = grossCardRevenue - (grossCardRevenue / 1.20);
-
-            // POS Commission (Applied on Gross Amount)
-            const posCommissionAmount = grossCardRevenue * (income.posRate / 100);
-
-            // Net Card Inflow
-            const netCardInflow = grossCardRevenue - vatAmount - posCommissionAmount;
-
-            const totalMonthlyRevenue = cashRevenue + netCardInflow;
+            // ... (previous logic) ...
 
             // --- Fixed Costs ---
-            const rentCost = Number(expenses.rent) * 1.20;
+            // Kira Stopajlı Hesaplama: Net / 0.80 = Brüt Kira Gideri
+            const rentCost = Number(expenses.rent) / 0.80;
             const currentMonthFixedCosts =
                 Number(expenses.staffFixedCost) +
                 rentCost +
@@ -194,15 +173,15 @@ function App() {
             const totalMonthlyExpenses = currentMonthFixedCosts + currentMonthTrainerCost;
 
             // --- Accumulate Totals ---
-            totalGrossCashRevenue += cashRevenue;
-            totalGrossCardRevenue += grossCardRevenue;
+            totalGrossCashRevenue += totalCashRevenue;
+            totalGrossCardRevenue += totalGrossCardRevenueCombined;
             totalVAT += vatAmount;
             totalPOS += posCommissionAmount;
             totalFixedExpenses += currentMonthFixedCosts;
             totalTrainerExpenses += currentMonthTrainerCost;
 
             // --- Profit Accumulation for Tax ---
-            const officialRevenueForTax = (grossCardRevenue - vatAmount);
+            const officialRevenueForTax = (totalGrossCardRevenueCombined - vatAmount);
             const currentMonthOfficialProfit = officialRevenueForTax - totalMonthlyExpenses;
 
             yearlyOfficialProfit += currentMonthOfficialProfit;
@@ -231,7 +210,8 @@ function App() {
                 tax: monthlyTax,
                 net: netMonthlyProfit,
                 balance: cumulativeBalance,
-                salesVolume: totalSales
+                salesVolume: totalPtSales,
+                groupVolume: totalGroupSales
             });
 
             // Increment Calendar Month
@@ -277,18 +257,19 @@ function App() {
                         <label>Maaşlı Sabit Personel (Toplam)</label>
                         <input type="number" value={expenses.staffFixedCost} onChange={e => setExpenses({ ...expenses, staffFixedCost: e.target.value })} />
                     </div>
-                    <div className="form-group">
-                        <label>Maaşlı Hoca Ders Başı Prim (TL)</label>
-                        <input type="number" value={expenses.staffPerLesson} onChange={e => setExpenses({ ...expenses, staffPerLesson: e.target.value })} />
+                    <div className="grid-2">
+                        <div className="form-group"><label>Maaşlı Hoca PT Primi (TL)</label><input type="number" value={expenses.staffPerLesson} onChange={e => setExpenses({ ...expenses, staffPerLesson: e.target.value })} /></div>
+                        <div className="form-group"><label>Maaşlı Hoca Grup Ücreti</label><input type="number" value={expenses.staffGroupLesson} onChange={e => setExpenses({ ...expenses, staffGroupLesson: e.target.value })} /></div>
                     </div>
-                    <div className="form-group">
-                        <label>Freelancer Hakediş Yüzdesi (%)</label>
-                        <input type="number" value={expenses.freelancePercentage} onChange={e => setExpenses({ ...expenses, freelancePercentage: e.target.value })} />
+
+                    <div className="grid-2">
+                        <div className="form-group"><label>Freelance PT Oranı (%)</label><input type="number" value={expenses.freelancePercentage} onChange={e => setExpenses({ ...expenses, freelancePercentage: e.target.value })} /></div>
+                        <div className="form-group"><label>Freelance Grup Ücreti (TL)</label><input type="number" value={expenses.freelanceGroupLesson} onChange={e => setExpenses({ ...expenses, freelanceGroupLesson: e.target.value })} /></div>
                     </div>
                     <div className="form-group">
                         <label>Kira (Net)</label>
                         <input type="number" value={expenses.rent} onChange={e => setExpenses({ ...expenses, rent: e.target.value })} />
-                        <small className="text-secondary">Stopaj (+%20) otomatik eklenecektir.</small>
+                        <small className="text-secondary">Stopaj (Net / 0.80) formülüyle brütleştirilip gider yazılacaktır.</small>
                     </div>
                     <div className="grid-2">
                         <div className="form-group"><label>Elektrik</label><input type="number" value={expenses.electricity} onChange={e => setExpenses({ ...expenses, electricity: e.target.value })} /></div>
@@ -315,6 +296,17 @@ function App() {
                         <div className="form-group"><label>Mimari / Tadilat</label><input type="number" value={startupCosts.architecture} onChange={e => setStartupCosts({ ...startupCosts, architecture: e.target.value })} /></div>
                         <div className="form-group"><label>Makine & Alet</label><input type="number" value={startupCosts.equipment} onChange={e => setStartupCosts({ ...startupCosts, equipment: e.target.value })} /></div>
                         <div className="form-group"><label>Demirbaş (Mobilya/PC)</label><input type="number" value={startupCosts.fixtures} onChange={e => setStartupCosts({ ...startupCosts, fixtures: e.target.value })} /></div>
+
+                        <div className="form-group" style={{ background: 'rgba(251, 191, 36, 0.1)', padding: '0.75rem', borderRadius: '0.25rem', border: '1px solid rgba(251, 191, 36, 0.2)' }}>
+                            <label style={{ color: '#fbbf24', fontSize: '0.9rem' }}>Kira Giderleri (Depozito + Komisyon)</label>
+                            <div style={{ fontSize: '1.1rem', fontWeight: 'bold' }}>
+                                {formatCurrency(Number(expenses.rent) * 3)}
+                            </div>
+                            <small className="text-secondary" style={{ display: 'block', marginTop: '0.25rem' }}>
+                                2 Kira Depozito: {formatCurrency(Number(expenses.rent) * 2)} <br />
+                                1 Kira Emlakçı: {formatCurrency(Number(expenses.rent) * 1)}
+                            </small>
+                        </div>
                     </div>
 
                     {/* 3. Income */}
@@ -351,6 +343,43 @@ function App() {
                             </div>
                         </div>
 
+                        <hr style={{ margin: '20px 0', borderColor: 'var(--border-color)' }} />
+
+                        <h3>🏋️‍♀️ Grup Dersleri</h3>
+                        <div className="grid-2">
+                            <div className="form-group">
+                                <label>Grup Paketi Fiyatı (10'lu)</label>
+                                <input type="number" value={income.groupPackagePrice} onChange={e => setIncome({ ...income, groupPackagePrice: e.target.value })} />
+                            </div>
+                            <div className="form-group">
+                                <label>Ort. Sınıf Mevcudu</label>
+                                <input type="number" value={income.avgClassSize} onChange={e => setIncome({ ...income, avgClassSize: e.target.value })} />
+                            </div>
+                        </div>
+
+                        <div className="form-group" style={{ background: 'rgba(124, 58, 237, 0.1)', padding: '1rem', borderRadius: '0.5rem', border: '1px solid rgba(124, 58, 237, 0.2)' }}>
+                            <label style={{ color: '#c084fc', fontWeight: 'bold' }}>Tahmini Grup Paket Satışı</label>
+                            <div className="stat-value">{calculateEstimatedGroupPackages()} Adet / Ay</div>
+                        </div>
+
+                        <div className="form-group">
+                            <label style={{ display: 'flex', justifyContent: 'space-between' }}>
+                                <span>💵 Nakit: %{income.groupCashRatio}</span>
+                                <span>💳 Kart: %{100 - income.groupCashRatio}</span>
+                            </label>
+                            <input
+                                type="range"
+                                min="0"
+                                max="100"
+                                step="10"
+                                value={income.groupCashRatio}
+                                onChange={e => setIncome({ ...income, groupCashRatio: Number(e.target.value) })}
+                                style={{ width: '100%', cursor: 'pointer', accentColor: '#c084fc' }}
+                            />
+                        </div>
+
+                        <hr style={{ margin: '20px 0', borderColor: 'var(--border-color)' }} />
+
                         <div className="form-group">
                             <label>Kart POS Komisyonu (%)</label>
                             <input type="number" value={income.posRate} onChange={e => setIncome({ ...income, posRate: e.target.value })} />
@@ -367,27 +396,38 @@ function App() {
                         const realizedLessons = Math.max(0, Number(trainer.monthlyLessons) - (Number(trainer.cancelRate) * 4));
                         let estimatedIncome = 0;
                         let incomeLabel = '';
-                        let isCostNegative = false; // To show positive/negative color logic
+                        // let isCostNegative = false; // Unused for now
+
+                        // Group Lesson Calculation for Trainer
+                        const groupLessons = Number(trainer.monthlyGroupLessons || 0);
+                        let groupEarnings = 0;
 
                         if (trainer.type === 'salary') {
                             estimatedIncome = realizedLessons * Number(expenses.staffPerLesson);
-                            incomeLabel = 'Ders Primi';
+                            groupEarnings = groupLessons * Number(expenses.staffGroupLesson);
+                            estimatedIncome += groupEarnings;
+                            incomeLabel = 'Toplam Prim';
                         } else if (trainer.type === 'freelance') {
                             const lessonPrice = Number(income.packagePrice) / 10;
                             estimatedIncome = realizedLessons * lessonPrice * (expenses.freelancePercentage / 100);
-                            incomeLabel = 'Hakediş';
+
+                            // Freelance group usually fixed fee
+                            groupEarnings = groupLessons * Number(expenses.freelanceGroupLesson);
+                            estimatedIncome += groupEarnings;
+
+                            incomeLabel = 'Toplam Hakediş';
                         } else if (trainer.type === 'owner') {
                             estimatedIncome = 11725.65;
                             incomeLabel = 'Bağkur Gideri';
-                            isCostNegative = true; // It's a fixed cost
                         }
 
                         // Calculate generated revenue for display (nice to have)
-                        // This is approximate since revenue depends on cash/card mix, but we can show Gross Revenue
-                        // 10 lessons = 1 package.
                         const generatedPackages = realizedLessons / 10;
                         const grossRevenueGenerated = generatedPackages * Number(income.packagePrice);
 
+                        // Group Revenue Generated (Approx)
+                        const groupRevenueGenerated = (groupLessons * Number(income.avgClassSize) / 10) * Number(income.groupPackagePrice);
+                        const totalGrossGenerated = grossRevenueGenerated + groupRevenueGenerated;
 
                         return (
                             <div key={trainer.id} className="trainer-card" style={trainer.type === 'owner' ? { borderColor: 'var(--accent-color)', background: 'rgba(56, 189, 248, 0.1)' } : {}}>
@@ -405,18 +445,22 @@ function App() {
                                     </select>
                                 </div>
                                 <div className="form-group">
-                                    <label>Aylık Ders Saati</label>
+                                    <label>Aylık PT Ders (Saat)</label>
                                     <input type="number" value={trainer.monthlyLessons} onChange={e => updateTrainer(trainer.id, 'monthlyLessons', e.target.value)} />
                                 </div>
                                 <div className="form-group">
-                                    <label>Haftalık İptal Sayısı</label>
+                                    <label>Aylık Grup Dersi (Saat)</label>
+                                    <input type="number" value={trainer.monthlyGroupLessons} onChange={e => updateTrainer(trainer.id, 'monthlyGroupLessons', e.target.value)} />
+                                </div>
+                                <div className="form-group">
+                                    <label>Haftalık İptal</label>
                                     <input type="number" value={trainer.cancelRate} onChange={e => updateTrainer(trainer.id, 'cancelRate', e.target.value)} />
                                 </div>
 
                                 <div style={{ marginTop: '1rem', padding: '0.75rem', background: 'rgba(0, 0, 0, 0.2)', borderRadius: '0.5rem' }}>
-                                    <div style={{ fontSize: '0.8rem', color: 'var(--text-secondary)' }}>Salon Kazancı</div>
+                                    <div style={{ fontSize: '0.8rem', color: 'var(--text-secondary)' }}>Salon Kazancı (Tahmini)</div>
                                     <div style={{ fontSize: '1rem', color: 'var(--success-color)' }}>
-                                        +{formatCurrency(grossRevenueGenerated)} <span style={{ fontSize: '0.7em' }}>(Brüt)</span>
+                                        +{formatCurrency(totalGrossGenerated)} <span style={{ fontSize: '0.7em' }}>(Brüt)</span>
                                     </div>
 
                                     <div style={{ marginTop: '0.5rem', paddingTop: '0.5rem', borderTop: '1px solid var(--border-color)' }}>
@@ -461,133 +505,135 @@ function App() {
             </div>
 
             {/* Results */}
-            {results && (
-                <div id="results-section" className="summary-section">
-                    <h2>📈 Simülasyon Sonucu ({simulationMonths} Ay)</h2>
+            {
+                results && (
+                    <div id="results-section" className="summary-section">
+                        <h2>📈 Simülasyon Sonucu ({simulationMonths} Ay)</h2>
 
-                    {/* Key Metrics */}
-                    <div className="grid-2">
-                        <div className="card">
-                            <h3>İlk Kurulum Maliyeti</h3>
-                            <div className="stat-value negative">{formatCurrency(results.totalStartup)}</div>
-                        </div>
-                        <div className="card">
-                            <h3>Dönem Sonu Bakiye</h3>
-                            <div className={`stat-value ${results.finalBalance >= 0 ? 'positive' : 'negative'}`}>
-                                {formatCurrency(results.finalBalance)}
+                        {/* Key Metrics */}
+                        <div className="grid-2">
+                            <div className="card">
+                                <h3>İlk Kurulum Maliyeti</h3>
+                                <div className="stat-value negative">{formatCurrency(results.totalStartup)}</div>
                             </div>
-                            <small>{simulationMonths} ayın sonunda kâr/zarar durumu</small>
+                            <div className="card">
+                                <h3>Dönem Sonu Bakiye</h3>
+                                <div className={`stat-value ${results.finalBalance >= 0 ? 'positive' : 'negative'}`}>
+                                    {formatCurrency(results.finalBalance)}
+                                </div>
+                                <small>{simulationMonths} ayın sonunda kâr/zarar durumu</small>
+                            </div>
                         </div>
-                    </div>
 
-                    {/* Detailed Breakdown Table */}
-                    <div className="card" style={{ marginTop: '2rem', padding: '0' }}>
-                        <div style={{ padding: '1.5rem', borderBottom: '1px solid var(--border-color)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                            <h3 style={{ margin: 0 }}>📊 Detaylı Gelir/Gider Tablosu</h3>
-                            <span style={{ fontSize: '0.8rem', color: 'var(--text-secondary)' }}>Toplam {simulationMonths} Aylık Veri</span>
-                        </div>
-                        <div style={{ padding: '0' }}>
-                            <table style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'left' }}>
-                                <tbody>
-                                    {/* Income Section */}
-                                    <tr style={{ background: 'rgba(255,255,255,0.02)' }}><td style={{ padding: '1rem', fontWeight: 'bold' }} colSpan="2">GELİRLER (BRÜT CİRO)</td></tr>
-                                    <tr>
-                                        <td style={{ padding: '0.75rem 1.5rem', color: 'var(--text-secondary)' }}>Nakit Satış Geliri</td>
-                                        <td style={{ padding: '0.75rem 1.5rem', textAlign: 'right' }}>{formatCurrency(results.breakdown.grossCash)}</td>
-                                    </tr>
-                                    <tr>
-                                        <td style={{ padding: '0.75rem 1.5rem', color: 'var(--text-secondary)' }}>Kredi Kartı Satış Geliri (Brüt)</td>
-                                        <td style={{ padding: '0.75rem 1.5rem', textAlign: 'right' }}>{formatCurrency(results.breakdown.grossCard)}</td>
-                                    </tr>
-
-                                    {/* Deductions */}
-                                    <tr style={{ background: 'rgba(255,255,255,0.02)' }}><td style={{ padding: '1rem', fontWeight: 'bold' }} colSpan="2">SATIŞ İNDİRİMLERİ (-)</td></tr>
-                                    <tr>
-                                        <td style={{ padding: '0.75rem 1.5rem', color: 'var(--danger-color)' }}>Ödenen KDV (%20)</td>
-                                        <td style={{ padding: '0.75rem 1.5rem', textAlign: 'right', color: 'var(--danger-color)' }}>-{formatCurrency(results.breakdown.vat)}</td>
-                                    </tr>
-                                    <tr>
-                                        <td style={{ padding: '0.75rem 1.5rem', color: 'var(--danger-color)' }}>POS Komisyonu</td>
-                                        <td style={{ padding: '0.75rem 1.5rem', textAlign: 'right', color: 'var(--danger-color)' }}>-{formatCurrency(results.breakdown.pos)}</td>
-                                    </tr>
-
-                                    {/* Net Revenue */}
-                                    <tr style={{ borderTop: '1px solid var(--border-color)', borderBottom: '1px solid var(--border-color)', background: 'rgba(34, 197, 94, 0.05)' }}>
-                                        <td style={{ padding: '1rem 1.5rem', fontWeight: 'bold', color: 'var(--success-color)' }}>NET CİRO (Kasa Girişi)</td>
-                                        <td style={{ padding: '1rem 1.5rem', textAlign: 'right', fontWeight: 'bold', color: 'var(--success-color)' }}>{formatCurrency(results.breakdown.netRevenue)}</td>
-                                    </tr>
-
-                                    {/* Expenses Section */}
-                                    <tr style={{ background: 'rgba(255,255,255,0.02)' }}><td style={{ padding: '1rem', fontWeight: 'bold' }} colSpan="2">GİDERLER (Faaliyet Giderleri) (-)</td></tr>
-                                    <tr>
-                                        <td style={{ padding: '0.75rem 1.5rem', color: 'var(--text-secondary)' }}>Sabit Giderler (Kira, Faturalar, Sabit Personel...)</td>
-                                        <td style={{ padding: '0.75rem 1.5rem', textAlign: 'right', color: 'var(--text-secondary)' }}>-{formatCurrency(results.breakdown.fixedExpenses)}</td>
-                                    </tr>
-                                    <tr>
-                                        <td style={{ padding: '0.75rem 1.5rem', color: 'var(--text-secondary)' }}>Değişken Giderler (Eğitmen Prim/Hakediş)</td>
-                                        <td style={{ padding: '0.75rem 1.5rem', textAlign: 'right', color: 'var(--text-secondary)' }}>-{formatCurrency(results.breakdown.trainerExpenses)}</td>
-                                    </tr>
-
-                                    {/* Tax */}
-                                    <tr style={{ background: 'rgba(255,255,255,0.02)' }}><td style={{ padding: '1rem', fontWeight: 'bold' }} colSpan="2">VERGİ (-)</td></tr>
-                                    <tr>
-                                        <td style={{ padding: '0.75rem 1.5rem', color: '#fbbf24' }}>Yıllık Gelir Vergisi</td>
-                                        <td style={{ padding: '0.75rem 1.5rem', textAlign: 'right', color: '#fbbf24' }}>-{formatCurrency(results.totalTax)}</td>
-                                    </tr>
-
-                                    {/* Final Net Profit */}
-                                    <tr style={{ background: 'var(--card-bg)', borderTop: '2px solid var(--border-color)' }}>
-                                        <td style={{ padding: '1.5rem', fontSize: '1.2rem', fontWeight: 'bold' }}>DÖNEM NET KÂRI</td>
-                                        <td style={{ padding: '1.5rem', textAlign: 'right', fontSize: '1.5rem', fontWeight: 'bold', color: (results.breakdown.netRevenue - results.breakdown.totalExpenses - results.totalTax) >= 0 ? 'var(--success-color)' : 'var(--danger-color)' }}>
-                                            {formatCurrency(results.breakdown.netRevenue - results.breakdown.totalExpenses - results.totalTax)}
-                                        </td>
-                                    </tr>
-                                </tbody>
-                            </table>
-                        </div>
-                    </div>
-
-                    <div style={{ marginTop: '2rem' }}>
-                        <h3>Aylık Nakit Akış Tablosu</h3>
-                        <div style={{ overflowX: 'auto' }}>
-                            <table style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'left', minWidth: '800px' }}>
-                                <thead>
-                                    <tr style={{ borderBottom: '1px solid var(--border-color)' }}>
-                                        <th style={{ padding: '1rem' }}>Ay</th>
-                                        <th style={{ padding: '1rem' }}>Net Gelir</th>
-                                        <th style={{ padding: '1rem' }}>KDV (%20)</th>
-                                        <th style={{ padding: '1rem' }}>Gider (Sabit+Hoca)</th>
-                                        <th style={{ padding: '1rem' }}>Vergi</th>
-                                        <th style={{ padding: '1rem' }}>Net (Aylık)</th>
-                                        <th style={{ padding: '1rem' }}>Kümülatif Bakiye</th>
-                                    </tr>
-                                </thead>
-                                <tbody>
-                                    {results.monthlyData.map(d => (
-                                        <tr key={d.month} style={{ borderBottom: '1px solid rgba(255,255,255,0.05)', background: d.tax > 0 ? 'rgba(251, 191, 36, 0.1)' : 'transparent' }}>
-                                            <td style={{ padding: '1rem' }}>
-                                                <div>{d.month}. Ay</div>
-                                                <div style={{ fontSize: '0.8em', color: 'var(--text-secondary)' }}>{d.calendarMonthName}</div>
-                                            </td>
-                                            <td style={{ padding: '1rem', color: 'var(--success-color)' }}>{formatCurrency(d.revenue)}</td>
-                                            <td style={{ padding: '1rem', color: 'var(--text-secondary)' }}>{formatCurrency(d.vat)}</td>
-                                            <td style={{ padding: '1rem', color: 'var(--danger-color)' }}>{formatCurrency(d.expenses)}</td>
-                                            <td style={{ padding: '1rem', color: '#fbbf24', fontWeight: d.tax > 0 ? 'bold' : 'normal' }}>
-                                                {formatCurrency(d.tax)}
-                                            </td>
-                                            <td style={{ padding: '1rem', color: d.net >= 0 ? 'var(--success-color)' : 'var(--danger-color)' }}>
-                                                {formatCurrency(d.net)}
-                                            </td>
-                                            <td style={{ padding: '1rem', fontWeight: 'bold' }}>{formatCurrency(d.balance)}</td>
+                        {/* Detailed Breakdown Table */}
+                        <div className="card" style={{ marginTop: '2rem', padding: '0' }}>
+                            <div style={{ padding: '1.5rem', borderBottom: '1px solid var(--border-color)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                                <h3 style={{ margin: 0 }}>📊 Detaylı Gelir/Gider Tablosu</h3>
+                                <span style={{ fontSize: '0.8rem', color: 'var(--text-secondary)' }}>Toplam {simulationMonths} Aylık Veri</span>
+                            </div>
+                            <div style={{ padding: '0' }}>
+                                <table style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'left' }}>
+                                    <tbody>
+                                        {/* Income Section */}
+                                        <tr style={{ background: 'rgba(255,255,255,0.02)' }}><td style={{ padding: '1rem', fontWeight: 'bold' }} colSpan="2">GELİRLER (BRÜT CİRO)</td></tr>
+                                        <tr>
+                                            <td style={{ padding: '0.75rem 1.5rem', color: 'var(--text-secondary)' }}>Nakit Satış Geliri</td>
+                                            <td style={{ padding: '0.75rem 1.5rem', textAlign: 'right' }}>{formatCurrency(results.breakdown.grossCash)}</td>
                                         </tr>
-                                    ))}
-                                </tbody>
-                            </table>
+                                        <tr>
+                                            <td style={{ padding: '0.75rem 1.5rem', color: 'var(--text-secondary)' }}>Kredi Kartı Satış Geliri (Brüt)</td>
+                                            <td style={{ padding: '0.75rem 1.5rem', textAlign: 'right' }}>{formatCurrency(results.breakdown.grossCard)}</td>
+                                        </tr>
+
+                                        {/* Deductions */}
+                                        <tr style={{ background: 'rgba(255,255,255,0.02)' }}><td style={{ padding: '1rem', fontWeight: 'bold' }} colSpan="2">SATIŞ İNDİRİMLERİ (-)</td></tr>
+                                        <tr>
+                                            <td style={{ padding: '0.75rem 1.5rem', color: 'var(--danger-color)' }}>Ödenen KDV (%20)</td>
+                                            <td style={{ padding: '0.75rem 1.5rem', textAlign: 'right', color: 'var(--danger-color)' }}>-{formatCurrency(results.breakdown.vat)}</td>
+                                        </tr>
+                                        <tr>
+                                            <td style={{ padding: '0.75rem 1.5rem', color: 'var(--danger-color)' }}>POS Komisyonu</td>
+                                            <td style={{ padding: '0.75rem 1.5rem', textAlign: 'right', color: 'var(--danger-color)' }}>-{formatCurrency(results.breakdown.pos)}</td>
+                                        </tr>
+
+                                        {/* Net Revenue */}
+                                        <tr style={{ borderTop: '1px solid var(--border-color)', borderBottom: '1px solid var(--border-color)', background: 'rgba(34, 197, 94, 0.05)' }}>
+                                            <td style={{ padding: '1rem 1.5rem', fontWeight: 'bold', color: 'var(--success-color)' }}>NET CİRO (Kasa Girişi)</td>
+                                            <td style={{ padding: '1rem 1.5rem', textAlign: 'right', fontWeight: 'bold', color: 'var(--success-color)' }}>{formatCurrency(results.breakdown.netRevenue)}</td>
+                                        </tr>
+
+                                        {/* Expenses Section */}
+                                        <tr style={{ background: 'rgba(255,255,255,0.02)' }}><td style={{ padding: '1rem', fontWeight: 'bold' }} colSpan="2">GİDERLER (Faaliyet Giderleri) (-)</td></tr>
+                                        <tr>
+                                            <td style={{ padding: '0.75rem 1.5rem', color: 'var(--text-secondary)' }}>Sabit Giderler (Kira, Faturalar, Sabit Personel...)</td>
+                                            <td style={{ padding: '0.75rem 1.5rem', textAlign: 'right', color: 'var(--text-secondary)' }}>-{formatCurrency(results.breakdown.fixedExpenses)}</td>
+                                        </tr>
+                                        <tr>
+                                            <td style={{ padding: '0.75rem 1.5rem', color: 'var(--text-secondary)' }}>Değişken Giderler (Eğitmen Prim/Hakediş)</td>
+                                            <td style={{ padding: '0.75rem 1.5rem', textAlign: 'right', color: 'var(--text-secondary)' }}>-{formatCurrency(results.breakdown.trainerExpenses)}</td>
+                                        </tr>
+
+                                        {/* Tax */}
+                                        <tr style={{ background: 'rgba(255,255,255,0.02)' }}><td style={{ padding: '1rem', fontWeight: 'bold' }} colSpan="2">VERGİ (-)</td></tr>
+                                        <tr>
+                                            <td style={{ padding: '0.75rem 1.5rem', color: '#fbbf24' }}>Yıllık Gelir Vergisi</td>
+                                            <td style={{ padding: '0.75rem 1.5rem', textAlign: 'right', color: '#fbbf24' }}>-{formatCurrency(results.totalTax)}</td>
+                                        </tr>
+
+                                        {/* Final Net Profit */}
+                                        <tr style={{ background: 'var(--card-bg)', borderTop: '2px solid var(--border-color)' }}>
+                                            <td style={{ padding: '1.5rem', fontSize: '1.2rem', fontWeight: 'bold' }}>DÖNEM NET KÂRI</td>
+                                            <td style={{ padding: '1.5rem', textAlign: 'right', fontSize: '1.5rem', fontWeight: 'bold', color: (results.breakdown.netRevenue - results.breakdown.totalExpenses - results.totalTax) >= 0 ? 'var(--success-color)' : 'var(--danger-color)' }}>
+                                                {formatCurrency(results.breakdown.netRevenue - results.breakdown.totalExpenses - results.totalTax)}
+                                            </td>
+                                        </tr>
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+
+                        <div style={{ marginTop: '2rem' }}>
+                            <h3>Aylık Nakit Akış Tablosu</h3>
+                            <div style={{ overflowX: 'auto' }}>
+                                <table style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'left', minWidth: '800px' }}>
+                                    <thead>
+                                        <tr style={{ borderBottom: '1px solid var(--border-color)' }}>
+                                            <th style={{ padding: '1rem' }}>Ay</th>
+                                            <th style={{ padding: '1rem' }}>Net Gelir</th>
+                                            <th style={{ padding: '1rem' }}>KDV (%20)</th>
+                                            <th style={{ padding: '1rem' }}>Gider (Sabit+Hoca)</th>
+                                            <th style={{ padding: '1rem' }}>Vergi</th>
+                                            <th style={{ padding: '1rem' }}>Net (Aylık)</th>
+                                            <th style={{ padding: '1rem' }}>Kümülatif Bakiye</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        {results.monthlyData.map(d => (
+                                            <tr key={d.month} style={{ borderBottom: '1px solid rgba(255,255,255,0.05)', background: d.tax > 0 ? 'rgba(251, 191, 36, 0.1)' : 'transparent' }}>
+                                                <td style={{ padding: '1rem' }}>
+                                                    <div>{d.month}. Ay</div>
+                                                    <div style={{ fontSize: '0.8em', color: 'var(--text-secondary)' }}>{d.calendarMonthName}</div>
+                                                </td>
+                                                <td style={{ padding: '1rem', color: 'var(--success-color)' }}>{formatCurrency(d.revenue)}</td>
+                                                <td style={{ padding: '1rem', color: 'var(--text-secondary)' }}>{formatCurrency(d.vat)}</td>
+                                                <td style={{ padding: '1rem', color: 'var(--danger-color)' }}>{formatCurrency(d.expenses)}</td>
+                                                <td style={{ padding: '1rem', color: '#fbbf24', fontWeight: d.tax > 0 ? 'bold' : 'normal' }}>
+                                                    {formatCurrency(d.tax)}
+                                                </td>
+                                                <td style={{ padding: '1rem', color: d.net >= 0 ? 'var(--success-color)' : 'var(--danger-color)' }}>
+                                                    {formatCurrency(d.net)}
+                                                </td>
+                                                <td style={{ padding: '1rem', fontWeight: 'bold' }}>{formatCurrency(d.balance)}</td>
+                                            </tr>
+                                        ))}
+                                    </tbody>
+                                </table>
+                            </div>
                         </div>
                     </div>
-                </div>
-            )}
-        </div>
+                )
+            }
+        </div >
     );
 }
 
