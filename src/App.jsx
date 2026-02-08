@@ -469,6 +469,7 @@ function App() {
             // --- Tax Adjustment Check (December) ---
             if (currentCalendarMonth === 12) {
                 const actualYearlyTax = calculateIncomeTax(Math.max(0, yearlyOfficialProfit));
+                // Şu ana kadar biriken + bu ayın tahmini = Yıl sonu toplam ödenmiş olacak olan
                 const totalEstimatedTaxPaid = totalTaxAccrued + monthlyTax;
 
                 taxDiscrepancy = actualYearlyTax - totalEstimatedTaxPaid;
